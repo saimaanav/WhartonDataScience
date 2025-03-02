@@ -68,8 +68,25 @@ def ft_FGA(teamStats):
     return teamStats['FTM']/teamStats['FGA']
 
 
+factorHistory = {}
+
 def skillFactor(teamStats, otherteamStats):
-    return eFGPercentage(teamStats) + sigmoid(TeamChemistry(teamStats)) + reboundEfficiency(teamStats, otherteamStats) + 0.5*teamStats['FTM']*(teamStats['FGA'] - teamStats['FGM']) # run ema later
+    if teamStats['team'] not in factorHistory:
+        factorHistory[teamStats['team']] = []
+    curSkill = eFGPercentage(teamStats) + sigmoid(TeamChemistry(teamStats)) + reboundEfficiency(teamStats, otherteamStats) + 0.5*teamStats['FTM']*(teamStats['FGA_2'] + teamStats['FGA_3'] - teamStats['FGM_2'] - teamStats['FGM_3'])
+    # split weights between 1 and 2
+    factorHistory[teamStats['team']].append(curSkill)
+    if len(factorHistory[teamStats['team']]) == 1:
+        return curSkill
+    jump = 1/(len(factorHistory[teamStats['team']])-1)
+    curWeight = 1
+    sum = 0
+    for i in factorHistory[teamStats['team']]:
+        sum += i*curWeight
+        curWeight += jump
+    sum /= len(factorHistory[teamStats['team']])
+    return sum
+
 
 
 gameList.sort(key=lambda x:x.date) # sort games by date
@@ -77,7 +94,7 @@ gameList.sort(key=lambda x:x.date) # sort games by date
 
 TeamRatings = {}
 defaultRating = 1000
-
+skillDiffs = []
 
 for game in gameList:
     team1 = game.t1Stats
@@ -87,16 +104,18 @@ for game in gameList:
         TeamRatings[team1['team']] = defaultRating
     if team2['team'] not in TeamRatings:
         TeamRatings[team2['team']] = defaultRating
-    ratingDiff = sigmoid(abs(TeamRatings[team1['team']] - TeamRatings[team2['team']]))
+    ratingDiff = sigmoid(abs(TeamRatings[team1['team']] - TeamRatings[team2['team']])) # had to run a sigmoid because of overflow
     E = 1/(1+math.e**ratingDiff) # add constant K to this 
     margin = abs(team1['team_score'] - team1['opponent_team_score'])
     scoringMargin = 5*math.log(1+margin)/2
     k = 0
     TeamRatings[team1['team']] += ((team1["team_score"] > team1['opponent_team_score']) - E)*((math.log(1+scoringMargin+k)/200)*(20/math.log(200)) + 40)
     TeamRatings[team2['team']] += ((team2["team_score"] > team2['opponent_team_score']) - E)*((math.log(1+scoringMargin+k)/200)*(20/math.log(200)) + 40)
+    skillDiffs.append(abs(skillFactor(team1, team2) - skillFactor(team2, team1)))
     
 
-
+print(skillDiffs)
 top5 = sorted(TeamRatings, key=TeamRatings.get, reverse=True)[:5]
 print(top5)
 print([TeamRatings[i] for i in top5])
+
